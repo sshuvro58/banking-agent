@@ -10,6 +10,7 @@ class CustomerRepo:
 
     async def get_by_id(self, customer_id: str) -> dict | None:
         """Fetch customer details by customer ID."""
+        print("Calling CustomerRepo.get_by_id")
         row = await db.fetchrow(
             """
             SELECT customer_id, name, email, phone, address,
@@ -31,6 +32,7 @@ class CustomerRepo:
 
     async def get_by_email(self, email: str) -> dict | None:
         """Fetch customer details by email address."""
+        print("Calling CustomerRepo.get_by_email")
         row = await db.fetchrow(
             """
             SELECT customer_id, name, email, phone, address,
@@ -52,6 +54,7 @@ class CustomerRepo:
 
     async def get_roles(self, customer_id: str) -> list[str]:
         """Fetch all role names assigned to a customer."""
+        print("Calling CustomerRepo.get_roles")
         rows = await db.fetch(
             """
             SELECT r.role_name
@@ -66,6 +69,7 @@ class CustomerRepo:
 
     async def get_profile_with_roles(self, customer_id: str) -> dict | None:
         """Fetch consolidated customer profile with aggregated roles from view."""
+        print("Calling CustomerRepo.get_profile_with_roles")
         row = await db.fetchrow(
             """
             SELECT customer_id, name, email, phone, address,
@@ -84,6 +88,7 @@ class CustomerRepo:
 
     async def update_address(self, customer_id: str, new_address: str) -> bool:
         """Update customer's primary address."""
+        print("Calling CustomerRepo.update_address")
         status = await db.execute(
             """
             UPDATE banking.customers
@@ -97,6 +102,7 @@ class CustomerRepo:
 
     async def update_kyc_status(self, customer_id: str, status: str) -> bool:
         """Update KYC verification status and record the update timestamp."""
+        print("Calling CustomerRepo.update_kyc_status")
         res = await db.execute(
             """
             UPDATE banking.customers
@@ -111,6 +117,7 @@ class CustomerRepo:
 
     async def verify_password(self, customer_id: str, password: str) -> bool:
         """Verify password against stored bcrypt hash, supporting 'demo' shortcut."""
+        print("Calling CustomerRepo.verify_password")
         password_hash = await db.fetchval(
             """
             SELECT password_hash

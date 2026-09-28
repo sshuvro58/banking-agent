@@ -1,42 +1,34 @@
 """
-AWS Bedrock client — wraps the Converse API.
-Handles tool-use, token counting, and cost estimation.
+AWS Bedrock LLM Client — wraps the Converse API.
 
-Usage:
-    from llm.bedrock_client import bedrock_llm
-
-    response = bedrock_llm.invoke(
-        messages=[{"role": "user", "content": [{"text": "Hello"}]}],
-        system_prompt="You are helpful.",
-        session_id="test",
-    )
-    print(response["reply"])
+Enable later by setting LLM_PROVIDER=bedrock in .env.
 """
 import time
-import boto3
+import json
 import logging
 from typing import Optional
-from config import bedrock_config
+import boto3
+from llm.base_client import BaseLLMClient
+from config import llm_config
 
-logger = logging.getLogger("bedrock")
+logger = logging.getLogger("llm.bedrock")
 
-# Pricing per 1K tokens (approximate, varies by model)
 MODEL_PRICING = {
-    "anthropic.claude-3-sonnet-20240229-v1:0": {"input": 0.003, "output": 0.015},
-    "anthropic.claude-3-haiku-20240307-v1:0": {"input": 0.00025, "output": 0.00125},
-    "anthropic.claude-3-5-sonnet-20240620-v1:0": {"input": 0.003, "output": 0.015},
+    "anthropic.claude-3-sonnet-20240229-v1:0": {"input": 3.0, "output": 15.0},
+    "anthropic.claude-3-haiku-20240307-v1:0": {"input": 0.25, "output": 1.25},
 }
-DEFAULT_PRICING = {"input": 0.003, "output": 0.015}
+DEFAULT_PRICING = {"input": 3.0, "output": 15.0}
 
 
-class BedrockLLM:
+class BedrockClient(BaseLLMClient):
     def __init__(self):
+        print("Calling BedrockClient.__init__")
         self.client = boto3.client(
             "bedrock-runtime",
-            region_name=bedrock_config.region,
+            region_name=llm_config.aws_region,
         )
-        self.model_id = bedrock_config.model_id
-
+        self.model_id = llm_config.model_id
+ 
     def invoke(
         self,
         messages: list[dict],
@@ -44,79 +36,53 @@ class BedrockLLM:
         tools: Optional[list[dict]] = None,
         session_id: str = "",
     ) -> dict:
-        """
-        Send a conversation to Bedrock and return the parsed response.
-
-        Parameters
-        ----------
-        messages : list[dict]
-            Conversation in Bedrock Converse format:
-            [{"role": "user", "content": [{"text": "..."}]}]
-        system_prompt : str
-            System-level instruction for the model.
-        tools : list[dict] | None
-            Tool definitions in Bedrock toolConfig format.
-        session_id : str
-            For logging — not sent to Bedrock.
-
-        Returns
-        -------
-        dict with keys:
-            reply          — text response (None if tool_use)
-            tool_uses      — list of tool_use blocks (None if text)
-            stop_reason    — "end_turn" or "tool_use"
-            input_tokens   — from response.usage
-            output_tokens  — from response.usage
-            estimated_cost — dollar estimate
-            latency_ms     — round-trip time
-            raw_message    — full message content (needed for tool loop)
-        """
-        # Build the request
-        kwargs = {
-            "modelId": self.model_id,
-            "messages": messages,
-        }
+        # Convert messages to Bedrock format
+        print("Calling BedrockClient.invoke")
+        bedrock_messages = self._to_bedrock_messages(messages)
+ 
+        kwargs = {"modelId": self.model_id, "messages": bedrock_messages}
         if system_prompt:
             kwargs["system"] = [{"text": system_prompt}]
         if tools:
-            kwargs["toolConfig"] = {"tools": tools}
-
-        # Call Bedrock
+            bedrock_tools = self._to_bedrock_tools(tools)
+            kwargs["toolConfig"] = {"tools": bedrock_tools}
+ 
         start = time.time()
         response = self.client.converse(**kwargs)
         latency_ms = (time.time() - start) * 1000
-
-        # Extract token usage
+ 
         usage = response.get("usage", {})
         input_tokens = usage.get("inputTokens", 0)
         output_tokens = usage.get("outputTokens", 0)
-
-        # Estimate cost
+ 
         pricing = MODEL_PRICING.get(self.model_id, DEFAULT_PRICING)
         estimated_cost = (
-            (input_tokens / 1000) * pricing["input"]
-            + (output_tokens / 1000) * pricing["output"]
+            (input_tokens / 1_000_000) * pricing["input"]
+            + (output_tokens / 1_000_000) * pricing["output"]
         )
-
-        # Parse the response message
+ 
         message = response.get("output", {}).get("message", {})
-        stop_reason = response.get("stopReason", "")
-
         reply_text = None
         tool_uses = []
-
+ 
         for block in message.get("content", []):
             if "text" in block:
                 reply_text = block["text"]
             elif "toolUse" in block:
-                tool_uses.append(block["toolUse"])
-
+                tool_uses.append({
+                    "name": block["toolUse"]["name"],
+                    "arguments": block["toolUse"]["input"],
+                    "id": block["toolUse"]["toolUseId"],
+                })
+ 
+        stop_reason = "tool_calls" if tool_uses else "stop"
+ 
         logger.info(
-            f"[LLM] session={session_id} tokens={input_tokens}+{output_tokens} "
-            f"cost=${estimated_cost:.6f} latency={latency_ms:.0f}ms "
-            f"stop={stop_reason}"
+            f"[LLM] model={self.model_id} session={session_id} "
+            f"tokens={input_tokens}+{output_tokens} cost=${estimated_cost:.6f} "
+            f"latency={latency_ms:.0f}ms stop={stop_reason}"
         )
-
+ 
         return {
             "reply": reply_text,
             "tool_uses": tool_uses if tool_uses else None,
@@ -125,41 +91,83 @@ class BedrockLLM:
             "output_tokens": output_tokens,
             "estimated_cost": round(estimated_cost, 6),
             "latency_ms": latency_ms,
-            "raw_message": message,
+            "model": self.model_id,
         }
-
-    @staticmethod
-    def build_tool_spec(name: str, description: str, parameters: dict) -> dict:
+ 
+    def build_assistant_message(self, tool_uses: list[dict]) -> dict:
         """
-        Convert a simple tool definition into Bedrock's toolSpec format.
-
-        Example input:
-            name = "balance_enquiry"
-            description = "Get account balance"
-            parameters = {
-                "properties": {
-                    "account_id": {"type": "string", "description": "The account ID"}
-                },
-                "required": ["account_id"]
-            }
-
-        Example output:
-            {"toolSpec": {"name": "...", "description": "...", "inputSchema": {"json": {...}}}}
+        Bedrock format: assistant message with toolUse content blocks.
+ 
+        Input:  [{"name": "balance_enquiry", "arguments": {"account_id": "acc_1001"}, "id": "tooluse_abc"}]
+        Output: {"role": "assistant", "content": [{"toolUse": {"toolUseId": "...", "name": "...", "input": {...}}}]}
         """
-        return {
-            "toolSpec": {
-                "name": name,
-                "description": description,
-                "inputSchema": {
-                    "json": {
-                        "type": "object",
-                        "properties": parameters.get("properties", {}),
-                        "required": parameters.get("required", []),
-                    }
-                },
-            }
-        }
-
-
-# Singleton
-bedrock_llm = BedrockLLM()
+        print("Calling BedrockClient.build_assistant_message")
+        content = []
+        for tu in tool_uses:
+            content.append({
+                "toolUse": {
+                    "toolUseId": tu["id"],
+                    "name": tu["name"],
+                    "input": tu["arguments"],
+                }
+            })
+        return {"role": "assistant", "content": content}
+ 
+    def build_tool_result_messages(self, tool_results: list[dict]) -> list[dict]:
+        """
+        Bedrock format: ONE user message with all toolResult blocks.
+ 
+        Input:  [{"id": "tooluse_abc", "name": "balance_enquiry", "result": "{...}", "is_error": False}]
+        Output: [{"role": "user", "content": [{"toolResult": {"toolUseId": "...", "content": [{"text": "..."}], "status": "success"}}]}]
+        """
+        print("Calling BedrockClient.build_tool_result_messages")
+        content = []
+        for tr in tool_results:
+            content.append({
+                "toolResult": {
+                    "toolUseId": tr["id"],
+                    "content": [{"text": tr["result"]}],
+                    "status": "error" if tr["is_error"] else "success",
+                }
+            })
+        return [{"role": "user", "content": content}]
+ 
+    # ── Internal format converters ────────────────────
+ 
+    def _to_bedrock_messages(self, messages: list[dict]) -> list[dict]:
+        """Convert provider-agnostic messages to Bedrock Converse format."""
+        print("Calling BedrockClient._to_bedrock_messages")
+        bedrock_msgs = []
+        for msg in messages:
+            content = msg.get("content")
+            role = msg.get("role")
+ 
+            if isinstance(content, str):
+                # Simple text message
+                bedrock_msgs.append({
+                    "role": role,
+                    "content": [{"text": content}],
+                })
+            elif isinstance(content, list):
+                # Already in Bedrock format (toolUse / toolResult blocks)
+                bedrock_msgs.append(msg)
+            else:
+                bedrock_msgs.append(msg)
+ 
+        return bedrock_msgs
+ 
+    def _to_bedrock_tools(self, tools: list[dict]) -> list[dict]:
+        """Convert OpenAI function-calling format to Bedrock toolSpec format."""
+        print("Calling BedrockClient._to_bedrock_tools")
+        bedrock_tools = []
+        for tool in tools:
+            func = tool["function"]
+            bedrock_tools.append({
+                "toolSpec": {
+                    "name": func["name"],
+                    "description": func["description"],
+                    "inputSchema": {"json": func["parameters"]},
+                }
+            })
+        return bedrock_tools
+ 

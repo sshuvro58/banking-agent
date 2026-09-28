@@ -11,11 +11,13 @@ router = APIRouter(prefix="/agent-trace", tags=["agent-traces"])
 
 @router.get("/get_all", response_model=list[AgentTraceOut])
 def list_agent_traces(db: DBSession = Depends(get_db)):
+    print("Calling list_agent_traces")
     return db.query(AgentTrace).all()
 
 
 @router.get("/get/{trace_id}", response_model=AgentTraceOut)
 def get_agent_trace(trace_id: int, db: DBSession = Depends(get_db)):
+    print("Calling get_agent_trace")
     trace = db.get(AgentTrace, trace_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Agent trace not found")
@@ -24,6 +26,7 @@ def get_agent_trace(trace_id: int, db: DBSession = Depends(get_db)):
 
 @router.post("/create", response_model=AgentTraceOut, status_code=201)
 def create_agent_trace(payload: AgentTraceCreate, db: DBSession = Depends(get_db)):
+    print("Calling create_agent_trace")
     trace = AgentTrace(**payload.model_dump())
     db.add(trace)
     db.commit()
@@ -33,6 +36,7 @@ def create_agent_trace(payload: AgentTraceCreate, db: DBSession = Depends(get_db
 
 @router.patch("/update/{trace_id}", response_model=AgentTraceOut)
 def update_agent_trace(trace_id: int, payload: AgentTraceUpdate, db: DBSession = Depends(get_db)):
+    print("Calling update_agent_trace")
     trace = db.get(AgentTrace, trace_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Agent trace not found")
@@ -45,6 +49,7 @@ def update_agent_trace(trace_id: int, payload: AgentTraceUpdate, db: DBSession =
 
 @router.delete("/delete/{trace_id}", status_code=204)
 def delete_agent_trace(trace_id: int, db: DBSession = Depends(get_db)):
+    print("Calling delete_agent_trace")
     trace = db.get(AgentTrace, trace_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Agent trace not found")

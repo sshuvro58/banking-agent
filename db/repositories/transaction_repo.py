@@ -12,6 +12,7 @@ class TransactionRepo:
         self, account_id: str, limit: int = 10, category: str = ""
     ) -> list[dict]:
         """Retrieve recent transactions for an account with optional category filtering[cite: 1]."""
+        print("Calling TransactionRepo.get_transactions")
         rows = await db.fetch(
             """
             SELECT transaction_id, account_id, type, amount, balance_after,
@@ -42,6 +43,7 @@ class TransactionRepo:
         self, account_id: str, month: int | None = None, year: int | None = None
     ) -> dict:
         """Generate account statement containing aggregation metrics, closing balance, and transaction history[cite: 1]."""
+        print("Calling TransactionRepo.get_statement")
         now = datetime.now(timezone.utc)
         target_month = month if month is not None else now.month
         target_year = year if year is not None else now.year

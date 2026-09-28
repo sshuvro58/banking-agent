@@ -11,6 +11,7 @@ class SessionRepo:
 
     async def create_session(self, customer_id: str) -> dict:
         """Create a new session record for a customer[cite: 1]."""
+        print("Calling SessionRepo.create_session")
         session_id = f"sess_{uuid.uuid4().hex[:12]}"
         row = await db.fetchrow(
             """
@@ -35,6 +36,7 @@ class SessionRepo:
 
     async def get_session(self, session_id: str) -> dict | None:
         """Retrieve an existing session by its session ID[cite: 1]."""
+        print("Calling SessionRepo.get_session")
         row = await db.fetchrow(
             """
             SELECT session_id, customer_id, shared_state, agent_context,
@@ -57,6 +59,7 @@ class SessionRepo:
 
     async def touch_session(self, session_id: str) -> None:
         """Update session's last activity timestamp to the current time[cite: 1]."""
+        print("Calling SessionRepo.touch_session")
         await db.execute(
             """
             UPDATE banking.sessions
@@ -74,6 +77,7 @@ class SessionRepo:
         agent_used: str | None = None,
     ) -> None:
         """Insert a conversation message and refresh the session timestamp[cite: 1]."""
+        print("Calling SessionRepo.add_message")
         await db.execute(
             """
             INSERT INTO banking.conversation_messages (
@@ -90,6 +94,7 @@ class SessionRepo:
 
     async def get_history(self, session_id: str, limit: int = 50) -> list[dict]:
         """Fetch conversation messages ordered chronologically[cite: 1]."""
+        print("Calling SessionRepo.get_history")
         rows = await db.fetch(
             """
             SELECT message_id, session_id, role, content, agent_used, created_at
@@ -110,6 +115,7 @@ class SessionRepo:
 
     async def set_shared_state(self, session_id: str, key: str, value: any) -> None:
         """Merge a key-value pair into the session shared_state JSONB field[cite: 1]."""
+        print("Calling SessionRepo.set_shared_state")
         payload = json.dumps(value)
         await db.execute(
             """
@@ -124,6 +130,7 @@ class SessionRepo:
 
     async def set_agent_context(self, session_id: str, agent: str, context: any) -> None:
         """Merge context data for a specific agent into agent_context JSONB[cite: 1]."""
+        print("Calling SessionRepo.set_agent_context")
         payload = json.dumps(context)
         await db.execute(
             """
@@ -140,6 +147,7 @@ class SessionRepo:
         self, session_id: str, placeholder: str, original: str, pii_type: str
     ) -> None:
         """Record a PII tokenization mapping for a session[cite: 1]."""
+        print("Calling SessionRepo.store_pii_mapping")
         await db.execute(
             """
             INSERT INTO banking.pii_redaction_map (
@@ -155,6 +163,7 @@ class SessionRepo:
 
     async def get_pii_mappings(self, session_id: str) -> dict[str, str]:
         """Retrieve all placeholder-to-original mappings for a session[cite: 1]."""
+        print("Calling SessionRepo.get_pii_mappings")
         rows = await db.fetch(
             """
             SELECT placeholder, original

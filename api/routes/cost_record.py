@@ -11,11 +11,13 @@ router = APIRouter(prefix="/cost-record", tags=["cost-records"])
 
 @router.get("/get_all", response_model=list[CostRecordOut])
 def list_cost_records(db: DBSession = Depends(get_db)):
+    print("Calling list_cost_records")
     return db.query(CostRecord).all()
 
 
 @router.get("/get/{cost_id}", response_model=CostRecordOut)
 def get_cost_record(cost_id: int, db: DBSession = Depends(get_db)):
+    print("Calling get_cost_record")
     cost_record = db.get(CostRecord, cost_id)
     if cost_record is None:
         raise HTTPException(status_code=404, detail="Cost record not found")
@@ -24,6 +26,7 @@ def get_cost_record(cost_id: int, db: DBSession = Depends(get_db)):
 
 @router.post("/create", response_model=CostRecordOut, status_code=201)
 def create_cost_record(payload: CostRecordCreate, db: DBSession = Depends(get_db)):
+    print("Calling create_cost_record")
     cost_record = CostRecord(**payload.model_dump())
     db.add(cost_record)
     db.commit()
@@ -33,6 +36,7 @@ def create_cost_record(payload: CostRecordCreate, db: DBSession = Depends(get_db
 
 @router.patch("/update/{cost_id}", response_model=CostRecordOut)
 def update_cost_record(cost_id: int, payload: CostRecordUpdate, db: DBSession = Depends(get_db)):
+    print("Calling update_cost_record")
     cost_record = db.get(CostRecord, cost_id)
     if cost_record is None:
         raise HTTPException(status_code=404, detail="Cost record not found")
@@ -45,6 +49,7 @@ def update_cost_record(cost_id: int, payload: CostRecordUpdate, db: DBSession = 
 
 @router.delete("/delete/{cost_id}", status_code=204)
 def delete_cost_record(cost_id: int, db: DBSession = Depends(get_db)):
+    print("Calling delete_cost_record")
     cost_record = db.get(CostRecord, cost_id)
     if cost_record is None:
         raise HTTPException(status_code=404, detail="Cost record not found")

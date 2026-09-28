@@ -11,11 +11,13 @@ router = APIRouter(prefix="/customer", tags=["customers"])
 
 @router.get("/get_all", response_model=list[CustomerOut])
 def list_customers(db: DBSession = Depends(get_db)):
+    print("Calling list_customers")
     return db.query(Customer).all()
 
 
 @router.get("/get/{customer_id}", response_model=CustomerOut)
 def get_customer(customer_id: str, db: DBSession = Depends(get_db)):
+    print("Calling get_customer")
     customer = db.get(Customer, customer_id)
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -24,6 +26,7 @@ def get_customer(customer_id: str, db: DBSession = Depends(get_db)):
 
 @router.post("/create", response_model=CustomerOut, status_code=201)
 def create_customer(payload: CustomerCreate, db: DBSession = Depends(get_db)):
+    print("Calling create_customer")
     customer = Customer(**payload.model_dump())
     db.add(customer)
     db.commit()
@@ -33,6 +36,7 @@ def create_customer(payload: CustomerCreate, db: DBSession = Depends(get_db)):
 
 @router.patch("/update/{customer_id}", response_model=CustomerOut)
 def update_customer(customer_id: str, payload: CustomerUpdate, db: DBSession = Depends(get_db)):
+    print("Calling update_customer")
     customer = db.get(Customer, customer_id)
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -45,6 +49,7 @@ def update_customer(customer_id: str, payload: CustomerUpdate, db: DBSession = D
 
 @router.delete("/delete/{customer_id}", status_code=204)
 def delete_customer(customer_id: str, db: DBSession = Depends(get_db)):
+    print("Calling delete_customer")
     customer = db.get(Customer, customer_id)
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")

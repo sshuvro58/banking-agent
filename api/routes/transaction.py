@@ -11,11 +11,13 @@ router = APIRouter(prefix="/transaction", tags=["transactions"])
 
 @router.get("/get_all", response_model=list[TransactionOut])
 def list_transactions(db: DBSession = Depends(get_db)):
+    print("Calling list_transactions")
     return db.query(Transaction).all()
 
 
 @router.get("/get/{transaction_id}", response_model=TransactionOut)
 def get_transaction(transaction_id: str, db: DBSession = Depends(get_db)):
+    print("Calling get_transaction")
     transaction = db.get(Transaction, transaction_id)
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -24,6 +26,7 @@ def get_transaction(transaction_id: str, db: DBSession = Depends(get_db)):
 
 @router.post("/create", response_model=TransactionOut, status_code=201)
 def create_transaction(payload: TransactionCreate, db: DBSession = Depends(get_db)):
+    print("Calling create_transaction")
     transaction = Transaction(**payload.model_dump())
     db.add(transaction)
     db.commit()
@@ -33,6 +36,7 @@ def create_transaction(payload: TransactionCreate, db: DBSession = Depends(get_d
 
 @router.patch("/update/{transaction_id}", response_model=TransactionOut)
 def update_transaction(transaction_id: str, payload: TransactionUpdate, db: DBSession = Depends(get_db)):
+    print("Calling update_transaction")
     transaction = db.get(Transaction, transaction_id)
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -45,6 +49,7 @@ def update_transaction(transaction_id: str, payload: TransactionUpdate, db: DBSe
 
 @router.delete("/delete/{transaction_id}", status_code=204)
 def delete_transaction(transaction_id: str, db: DBSession = Depends(get_db)):
+    print("Calling delete_transaction")
     transaction = db.get(Transaction, transaction_id)
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")

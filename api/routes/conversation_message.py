@@ -11,11 +11,13 @@ router = APIRouter(prefix="/conversation-message", tags=["conversation-messages"
 
 @router.get("/get_all", response_model=list[ConversationMessageOut])
 def list_conversation_messages(db: DBSession = Depends(get_db)):
+    print("Calling list_conversation_messages")
     return db.query(ConversationMessage).all()
 
 
 @router.get("/get/{message_id}", response_model=ConversationMessageOut)
 def get_conversation_message(message_id: int, db: DBSession = Depends(get_db)):
+    print("Calling get_conversation_message")
     message = db.get(ConversationMessage, message_id)
     if message is None:
         raise HTTPException(status_code=404, detail="Conversation message not found")
@@ -24,6 +26,7 @@ def get_conversation_message(message_id: int, db: DBSession = Depends(get_db)):
 
 @router.post("/create", response_model=ConversationMessageOut, status_code=201)
 def create_conversation_message(payload: ConversationMessageCreate, db: DBSession = Depends(get_db)):
+    print("Calling create_conversation_message")
     message = ConversationMessage(**payload.model_dump())
     db.add(message)
     db.commit()
@@ -35,6 +38,7 @@ def create_conversation_message(payload: ConversationMessageCreate, db: DBSessio
 def update_conversation_message(
     message_id: int, payload: ConversationMessageUpdate, db: DBSession = Depends(get_db)
 ):
+    print("Calling update_conversation_message")
     message = db.get(ConversationMessage, message_id)
     if message is None:
         raise HTTPException(status_code=404, detail="Conversation message not found")
@@ -47,6 +51,7 @@ def update_conversation_message(
 
 @router.delete("/delete/{message_id}", status_code=204)
 def delete_conversation_message(message_id: int, db: DBSession = Depends(get_db)):
+    print("Calling delete_conversation_message")
     message = db.get(ConversationMessage, message_id)
     if message is None:
         raise HTTPException(status_code=404, detail="Conversation message not found")

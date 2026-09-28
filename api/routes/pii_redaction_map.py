@@ -11,11 +11,13 @@ router = APIRouter(prefix="/pii-redaction", tags=["pii-redactions"])
 
 @router.get("/get_all", response_model=list[PiiRedactionMapOut])
 def list_pii_redactions(db: DBSession = Depends(get_db)):
+    print("Calling list_pii_redactions")
     return db.query(PiiRedactionMap).all()
 
 
 @router.get("/get/{map_id}", response_model=PiiRedactionMapOut)
 def get_pii_redaction(map_id: int, db: DBSession = Depends(get_db)):
+    print("Calling get_pii_redaction")
     entry = db.get(PiiRedactionMap, map_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="PII redaction entry not found")
@@ -24,6 +26,7 @@ def get_pii_redaction(map_id: int, db: DBSession = Depends(get_db)):
 
 @router.post("/create", response_model=PiiRedactionMapOut, status_code=201)
 def create_pii_redaction(payload: PiiRedactionMapCreate, db: DBSession = Depends(get_db)):
+    print("Calling create_pii_redaction")
     entry = PiiRedactionMap(**payload.model_dump())
     db.add(entry)
     db.commit()
@@ -33,6 +36,7 @@ def create_pii_redaction(payload: PiiRedactionMapCreate, db: DBSession = Depends
 
 @router.patch("/update/{map_id}", response_model=PiiRedactionMapOut)
 def update_pii_redaction(map_id: int, payload: PiiRedactionMapUpdate, db: DBSession = Depends(get_db)):
+    print("Calling update_pii_redaction")
     entry = db.get(PiiRedactionMap, map_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="PII redaction entry not found")
@@ -45,6 +49,7 @@ def update_pii_redaction(map_id: int, payload: PiiRedactionMapUpdate, db: DBSess
 
 @router.delete("/delete/{map_id}", status_code=204)
 def delete_pii_redaction(map_id: int, db: DBSession = Depends(get_db)):
+    print("Calling delete_pii_redaction")
     entry = db.get(PiiRedactionMap, map_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="PII redaction entry not found")

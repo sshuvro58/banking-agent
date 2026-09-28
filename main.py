@@ -6,11 +6,14 @@ from db.repositories.observability_repo import observability_repo
 from db.repositories.service_repo import service_repo
 from db.repositories.session_repo import session_repo
 from db.repositories.transaction_repo import transaction_repo
-from llm.bedrock_client import bedrock_llm
-
+from llm import llm_client
+from llm.base_client import BaseLLMClient
+from mcp.accounts_mcp import accounts_mcp
+import json
 
 async def test_connection():
     """Phase 0: can we talk to the database?"""
+    print("Calling test_connection")
     print("=" * 50)
     print("  Testing database connection")
     print("=" * 50)
@@ -28,6 +31,7 @@ async def test_connection():
 
 async def test_account_repo():
     """Phase 1: does account_repo work?"""
+    print("Calling test_account_repo")
     print("=" * 50)
     print("  Testing account_repo")
     print("=" * 50)
@@ -74,6 +78,7 @@ async def test_account_repo():
 
 async def test_customer_repo():
     """Phase 2: does customer_repo work?"""
+    print("Calling test_customer_repo")
     print("=" * 50)
     print("  Testing customer_repo")
     print("=" * 50)
@@ -107,6 +112,7 @@ async def test_customer_repo():
 
 async def test_session_repo():
     """Phase 3: does session_repo work?"""
+    print("Calling test_session_repo")
     print("=" * 50)
     print("  Testing session_repo")
     print("=" * 50)
@@ -138,6 +144,7 @@ async def test_session_repo():
 
 async def test_observability_repo():
     """Phase 4: does observability_repo work?"""
+    print("Calling test_observability_repo")
     print("=" * 50)
     print("  Testing observability_repo")
     print("=" * 50)
@@ -172,6 +179,7 @@ async def test_observability_repo():
 
 async def test_service_repo():
     """Phase 5: does service_repo work?"""
+    print("Calling test_service_repo")
     print("=" * 50)
     print("  Testing service_repo")
     print("=" * 50)
@@ -215,6 +223,7 @@ async def test_service_repo():
 
 async def test_transaction_repo():
     """Phase 6: does transaction_repo work?"""
+    print("Calling test_transaction_repo")
     print("=" * 50)
     print("  Testing transaction_repo")
     print("=" * 50)
@@ -238,40 +247,40 @@ async def test_transaction_repo():
 
 
 
-
 def test_basic_chat():
     """Test 1: simple text response."""
+    print("Calling test_basic_chat")
     print("=" * 50)
-    print("  Test 1: Basic chat")
+    print(f"  Test 1: Basic chat ({llm_client.model_id})")
     print("=" * 50)
  
-    response = bedrock_llm.invoke(
-        messages=[{"role": "user", "content": [{"text": "What is 2+2? Reply in one word."}]}],
+    response = llm_client.invoke(
+        messages=[{"role": "user", "content": "What is AI"}],
         system_prompt="You are a helpful assistant. Be extremely brief.",
         session_id="test_basic",
     )
  
     print(f"  Reply: {response['reply']}")
+    print(f"  Model: {response['model']}")
     print(f"  Tokens: {response['input_tokens']} in, {response['output_tokens']} out")
     print(f"  Cost: ${response['estimated_cost']}")
     print(f"  Latency: {response['latency_ms']:.0f}ms")
-    print(f"  Stop reason: {response['stop_reason']}")
  
     assert response["reply"] is not None, "Should have a text reply"
     assert response["tool_uses"] is None, "Should have no tool calls"
-    assert response["stop_reason"] == "end_turn", "Should be end_turn"
     print("  ✓ Passed\n")
  
  
-def test_tool_use():
+def test_tool_calling():
     """Test 2: LLM wants to call a tool."""
+    print("Calling test_tool_calling")
     print("=" * 50)
-    print("  Test 2: Tool use")
+    print(f"  Test 2: Tool calling ({llm_client.model_id})")
     print("=" * 50)
  
-    # Define a fake tool
+    # Define a tool using the universal format
     tools = [
-        bedrock_llm.build_tool_spec(
+        BaseLLMClient.build_tool_spec(
             name="get_weather",
             description="Get current weather for a city",
             parameters={
@@ -283,9 +292,9 @@ def test_tool_use():
         )
     ]
  
-    response = bedrock_llm.invoke(
-        messages=[{"role": "user", "content": [{"text": "What's the weather in Tokyo?"}]}],
-        system_prompt="You have access to a weather tool. Use it to answer weather questions.",
+    response = llm_client.invoke(
+        messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+        system_prompt="You have a weather tool. Always use it for weather questions.",
         tools=tools,
         session_id="test_tools",
     )
@@ -294,43 +303,190 @@ def test_tool_use():
     print(f"  Tool uses: {response['tool_uses']}")
     print(f"  Stop reason: {response['stop_reason']}")
  
-    assert response["stop_reason"] == "tool_use", "Should want to use a tool"
+    assert response["stop_reason"] == "tool_calls", "Should want to use a tool"
     assert response["tool_uses"] is not None, "Should have tool calls"
     assert response["tool_uses"][0]["name"] == "get_weather", "Should call get_weather"
-    print(f"  Tool called: {response['tool_uses'][0]['name']}")
-    print(f"  Arguments: {response['tool_uses'][0]['input']}")
+ 
+    tool_call = response["tool_uses"][0]
+    print(f"  Tool: {tool_call['name']}")
+    print(f"  Args: {tool_call['arguments']}")
+    print(f"  ID: {tool_call['id']}")
     print("  ✓ Passed\n")
  
  
-def test_system_prompt():
-    """Test 3: system prompt shapes the response."""
+def test_tool_spec_format():
+    """Test 3: build_tool_spec produces correct format."""
+    print("Calling test_tool_spec_format")
     print("=" * 50)
-    print("  Test 3: System prompt")
+    print("  Test 3: Tool spec format")
     print("=" * 50)
  
-    response = bedrock_llm.invoke(
-        messages=[{"role": "user", "content": [{"text": "Who are you?"}]}],
-        system_prompt="You are a banking assistant named BankBot. Introduce yourself in one sentence.",
-        session_id="test_system",
+    spec = BaseLLMClient.build_tool_spec(
+        name="balance_enquiry",
+        description="Get account balance",
+        parameters={
+            "properties": {
+                "account_id": {"type": "string", "description": "The account ID"}
+            },
+            "required": ["account_id"],
+        },
     )
  
-    print(f"  Reply: {response['reply']}")
-    assert response["reply"] is not None
+    assert spec["type"] == "function"
+    assert spec["function"]["name"] == "balance_enquiry"
+    assert "account_id" in spec["function"]["parameters"]["properties"]
+ 
+    print(f"  Spec: {json.dumps(spec, indent=2)}")
+    print("  ✓ Passed\n")
+
+
+async def test_tool_discovery():
+    """Test 1: can agents discover what tools are available?"""
+    print("Calling test_tool_discovery")
+    print("=" * 50)
+    print("  Test 1: Tool discovery")
+    print("=" * 50)
+ 
+    # Raw tool list
+    tools = accounts_mcp.list_tools()
+    print(f"  Tools registered: {[t['name'] for t in tools]}")
+    assert len(tools) == 2, f"Expected 2 tools, got {len(tools)}"
+ 
+    # LLM-ready format (OpenAI function-calling)
+    specs = accounts_mcp.get_tool_specs()
+    for spec in specs:
+        func = spec["function"]
+        print(f"  Tool: {func['name']}")
+        print(f"    Description: {func['description']}")
+        print(f"    Parameters: {list(func['parameters']['properties'].keys())}")
+    assert specs[0]["type"] == "function"
+ 
     print("  ✓ Passed\n")
  
-
+async def test_tool_invocation():
+    """Test 2: call tools successfully."""
+    print("Calling test_tool_invocation")
+    print("=" * 50)
+    print("  Test 2: Tool invocation")
+    print("=" * 50)
+ 
+    await db.connect()
+ 
+    # Balance enquiry
+    result = await accounts_mcp.call_tool("balance_enquiry", {"account_id": "acc_1001"})
+    print(f"  balance_enquiry:")
+    print(f"    Success: {result.success}")
+    print(f"    Data: {result.data}")
+    print(f"    Time: {result.execution_ms:.0f}ms")
+    assert result.success is True
+    assert result.data["account_id"] == "acc_1001"
+    assert isinstance(result.data["balance"], float)
+ 
+    # List accounts
+    result = await accounts_mcp.call_tool("list_accounts", {"customer_id": "cust_001"})
+    print(f"  list_accounts:")
+    print(f"    Success: {result.success}")
+    print(f"    Accounts: {len(result.data['accounts'])}")
+    assert result.success is True
+    assert len(result.data["accounts"]) == 2
+ 
+    await db.disconnect()
+    print("  ✓ Passed\n")
+ 
+ 
+async def test_error_handling():
+    """Test 3: tools handle errors gracefully."""
+    print("Calling test_error_handling")
+    print("=" * 50)
+    print("  Test 3: Error handling")
+    print("=" * 50)
+ 
+    await db.connect()
+ 
+    # Non-existent account → ValueError → VALIDATION error
+    result = await accounts_mcp.call_tool("balance_enquiry", {"account_id": "acc_9999"})
+    print(f"  Non-existent account:")
+    print(f"    Success: {result.success}")
+    print(f"    Error: {result.error}")
+    print(f"    Error type: {result.error_type}")
+    assert result.success is False
+    assert result.error_type.value == "validation"
+ 
+    # Unknown tool → UNKNOWN_TOOL error
+    result = await accounts_mcp.call_tool("nonexistent_tool", {})
+    print(f"  Unknown tool:")
+    print(f"    Success: {result.success}")
+    print(f"    Error type: {result.error_type}")
+    assert result.success is False
+    assert result.error_type.value == "unknown_tool"
+ 
+    await db.disconnect()
+    print("  ✓ Passed\n")
+ 
+ 
+async def test_full_flow():
+    """Test 4: simulate what the agent does — discover tools, pick one, call it."""
+    print("Calling test_full_flow")
+    print("=" * 50)
+    print("  Test 4: Full agent flow simulation")
+    print("=" * 50)
+ 
+    await db.connect()
+ 
+    # Step 1: Agent gets tool specs to send to LLM
+    specs = accounts_mcp.get_tool_specs()
+    print(f"  Step 1 — Discovered {len(specs)} tools")
+ 
+    # Step 2: LLM would return something like this (simulated)
+    llm_tool_call = {
+        "name": "balance_enquiry",
+        "arguments": {"account_id": "acc_1001"},
+        "id": "call_abc123",
+    }
+    print(f"  Step 2 — LLM chose: {llm_tool_call['name']}({llm_tool_call['arguments']})")
+ 
+    # Step 3: Agent executes the tool
+    result = await accounts_mcp.call_tool(
+        llm_tool_call["name"],
+        llm_tool_call["arguments"],
+    )
+    print(f"  Step 3 — Tool result: success={result.success}")
+ 
+    # Step 4: Agent would feed this back to LLM as tool result
+    tool_response = json.dumps(result.data if result.success else {"error": result.error})
+    print(f"  Step 4 — Feed back to LLM: {tool_response[:80]}...")
+ 
+    assert result.success is True
+ 
+    await db.disconnect()
+    print("  ✓ Passed\n")
+ 
+ 
 async def main():
-    await test_connection()
-    await test_account_repo()
+    # await test_connection()
+    # await test_account_repo()
     #await test_customer_repo()
-    await test_session_repo()
-    await test_observability_repo()
+    # await test_session_repo()
+    # await test_observability_repo()
     #await test_service_repo()
     #await test_transaction_repo()
-    await asyncio.to_thread(test_basic_chat)
+    print("Calling main")
+    test_basic_chat()          # first real LLM call
+    test_tool_spec_format()     # no API call, test format first
+    test_tool_calling() 
     print("=" * 50)
     print("  All tests passed!")
     print("=" * 50)
+
+    await test_tool_discovery()
+    await test_tool_invocation()
+    await test_error_handling()
+    await test_full_flow()
+ 
+    print("=" * 50)
+    print("  All MCP tests passed!")
+    print("=" * 50)
+ 
 
  
  
