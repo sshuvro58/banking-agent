@@ -127,7 +127,17 @@ class SessionRepo:
             key,
             payload,
         )
-
+    async def get_shared_state(self, session_id: str) -> dict:
+        """Get the full shared state dict for a session."""
+        val = await db.fetchval(
+            "SELECT shared_state FROM banking.sessions WHERE session_id = $1",
+            session_id,
+        )
+        if val is None:
+            return {}
+        if isinstance(val, str):
+            return json.loads(val)
+        return dict(val)
     async def set_agent_context(self, session_id: str, agent: str, context: any) -> None:
         """Merge context data for a specific agent into agent_context JSONB[cite: 1]."""
         print("Calling SessionRepo.set_agent_context")

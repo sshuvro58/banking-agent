@@ -74,7 +74,21 @@ def load_llm_config() -> LLMConfig:
     )
 
 
+@dataclass(frozen=True)
+class JWTConfig:
+    secret_key: str
+    algorithm: str
+    expiry_minutes: int
+
+def load_jwt_config() -> JWTConfig:
+    return JWTConfig(
+        secret_key=os.environ.get("JWT_SECRET_KEY", "dev-secret-change-in-prod"),
+        algorithm=os.environ.get("JWT_ALGORITHM", "HS256"),
+        expiry_minutes=int(os.environ.get("JWT_EXPIRY_MINUTES", "30")),
+    )
+
 # ── Singletons (import these across the project) ─────
 
 db_config = load_db_config()
 llm_config = load_llm_config()
+jwt_config = load_jwt_config()
