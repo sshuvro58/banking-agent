@@ -2,13 +2,14 @@
 Coordinator Agent — the orchestrator.
 
 This is the ONLY agent the API route calls. It:
-  1. Asks the LLM to classify the user's intent (routing)
-  2. Checks if the user is authorized for that action
-  3. Builds context from PostgreSQL (customer profile, accounts)
-  4. Delegates to the right sub-agent
-  5. Records traces and shares context between agents
-
-The user never interacts with sub-agents directly.
+  1. Checks if there's an active agent for this session (ongoing conversation)
+  2. If follow-up → skip routing, keep same agent
+  3. If new topic → ask the LLM to classify intent (routing)
+  4. Checks if the user is authorized for that action
+  5. Builds context from PostgreSQL (customer profile, accounts)
+  6. Loads conversation history for multi-turn memory
+  7. Delegates to the right sub-agent
+  8. Records traces and shares context between agents
 """
 import json
 import time
@@ -25,9 +26,8 @@ from db.repositories.observability_repo import observability_repo
 
 logger = logging.getLogger("coordinator")
 
+
 # ── Routing prompt ────────────────────────────────────
-# This is the most important prompt in the system.
-# It must produce clean JSON. No markdown, no explanation.
 
 ROUTING_PROMPT = """You are a routing coordinator for a banking assistant.
 Your ONLY job is to decide which specialist agent should handle the user's request.
@@ -49,6 +49,7 @@ Valid actions per agent:
 """
 
 # ── General chat prompt ───────────────────────────────
+
 GENERAL_PROMPT = """You are a friendly banking assistant. Respond to greetings
 and help users understand what services are available:
 - Check account balances
@@ -96,21 +97,56 @@ class CoordinatorAgent:
         user_roles = user_claims.get("roles", [])
         start_time = time.time()
 
-        # ── Step 1: Route ─────────────────────────────
-        routing = await self._route_message(message, session_id)
-        agent_name = routing.get("agent", "general")
-        action = routing.get("action", "general")
+        # ── Step 0: Check for active agent ────────────
+        # If a conversation is ongoing with a specific agent,
+        # keep delegating to it unless the user changes topic.
+        shared_state = await session_repo.get_shared_state(session_id)
+        active_agent_name = shared_state.get("active_agent") if shared_state else None
+
+        if active_agent_name and active_agent_name in self.agents:
+            # Check if user is continuing or changing topic
+            is_topic_change = await self._is_topic_change(
+                message, active_agent_name, session_id
+            )
+
+            if not is_topic_change:
+                # Follow-up — skip routing, keep same agent
+                agent_name = active_agent_name
+                action = shared_state.get("active_action", "general")
+                logger.info(
+                    f"[COORDINATOR] Continuing with {agent_name} (follow-up)"
+                )
+            else:
+                # New topic — route normally
+                routing = await self._route_message(message, session_id)
+                agent_name = routing.get("agent", "general")
+                action = routing.get("action", "general")
+                logger.info(
+                    f"[COORDINATOR] Topic change → routed to {agent_name}"
+                )
+        else:
+            # No active agent — route normally
+            routing = await self._route_message(message, session_id)
+            agent_name = routing.get("agent", "general")
+            action = routing.get("action", "general")
 
         logger.info(
-            f"[COORDINATOR] Routed to {agent_name} "
-            f"(action={action}) session={session_id}"
+            f"[COORDINATOR] → {agent_name} (action={action}) "
+            f"session={session_id}"
         )
 
-        # ── Step 2: General messages ──────────────────
+        # ── Step 1: General messages ──────────────────
         if agent_name == "general":
+            # Clear active agent — general doesn't need continuity
+            await session_repo.set_shared_state(
+                session_id, "active_agent", None
+            )
+            await session_repo.set_shared_state(
+                session_id, "active_action", None
+            )
             return await self._handle_general(message, session_id)
 
-        # ── Step 3: Authorization check ───────────────
+        # ── Step 2: Authorization check ───────────────
         if not check_authorisation(user_roles, action):
             await observability_repo.record_trace(
                 session_id=session_id,
@@ -133,8 +169,11 @@ class CoordinatorAgent:
                 "cost": await observability_repo.get_session_cost(session_id),
             }
 
-        # ── Step 4: Build context from database ───────
+        # ── Step 3: Build context from database ───────
         context = await self._build_agent_context(customer_id, session_id)
+
+        # ── Step 4: Load conversation history ─────────
+        history = await session_repo.get_history(session_id, limit=20)
 
         # ── Step 5: Delegate to sub-agent ─────────────
         agent = self.agents[agent_name]
@@ -142,9 +181,18 @@ class CoordinatorAgent:
             user_message=message,
             session_id=session_id,
             context=context,
+            history=history,
         )
 
-        # ── Step 6: Store inter-agent context ─────────
+        # ── Step 6: Track active agent in session ─────
+        await session_repo.set_shared_state(
+            session_id, "active_agent", agent_name
+        )
+        await session_repo.set_shared_state(
+            session_id, "active_action", action
+        )
+
+        # Store inter-agent context
         await session_repo.set_agent_context(
             session_id,
             agent_name,
@@ -168,6 +216,8 @@ class CoordinatorAgent:
             "agent_used": agent_name,
             "cost": await observability_repo.get_session_cost(session_id),
         }
+
+    # ── Private methods ───────────────────────────────
 
     async def _route_message(self, message: str, session_id: str) -> dict:
         """
@@ -211,6 +261,46 @@ class CoordinatorAgent:
                 f"[COORDINATOR] Failed to parse routing JSON: {response['reply']}"
             )
             return {"agent": "general", "action": "general"}
+
+    async def _is_topic_change(
+        self, message: str, current_agent: str, session_id: str
+    ) -> bool:
+        """
+        Ask the LLM if the user's message is a follow-up to the current
+        conversation or a completely new topic.
+
+        This prevents short messages like "20" or "yes" from being
+        routed away from the active agent.
+        """
+        response = llm_client.invoke(
+            messages=[{"role": "user", "content": message}],
+            system_prompt=(
+                f"The user is currently in a conversation handled by '{current_agent}'.\n"
+                f"Agents: accounts_agent (balances), transaction_agent (transactions), "
+                f"service_agent (address/chequebook/KYC).\n\n"
+                f"Is the following message a follow-up to the {current_agent} conversation, "
+                f"or is it a completely new topic that needs a different agent?\n\n"
+                f"Respond with ONLY one word: 'follow-up' or 'new-topic'"
+            ),
+            session_id=session_id,
+        )
+
+        await observability_repo.record_cost(
+            session_id=session_id,
+            model=response["model"],
+            input_tokens=response["input_tokens"],
+            output_tokens=response["output_tokens"],
+            estimated_cost=response["estimated_cost"],
+        )
+
+        reply = (response["reply"] or "").strip().lower()
+        is_new = "new" in reply
+
+        logger.info(
+            f"[COORDINATOR] Topic check: '{message[:50]}' → "
+            f"{'NEW TOPIC' if is_new else 'FOLLOW-UP'}"
+        )
+        return is_new
 
     async def _handle_general(self, message: str, session_id: str) -> dict:
         """Handle greetings and general questions without a sub-agent."""

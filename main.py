@@ -45,19 +45,11 @@ app.add_middleware(EdgeLayerMiddleware)
 # ── API routes ────────────────────────────────────────
 app.include_router(router, prefix="/api")
 
-# ── Serve frontend (Phase 10) ────────────────────────
-# Uncomment after creating frontend/index.html:
-# app.mount("/static", StaticFiles(directory="frontend"), name="static")
-#
-# @app.get("/")
-# async def serve_frontend():
-#     return FileResponse("frontend/index.html")
 
-# ── Temporary root (until frontend is built) ─────────
+
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
 @app.get("/")
-async def root():
-    return {
-        "service": "Banking Agentic AI System",
-        "status": "running",
-        "docs": "/docs",
-    }
+async def serve_frontend():
+    return FileResponse("frontend/index.html")
+

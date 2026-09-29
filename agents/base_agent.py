@@ -19,6 +19,8 @@ Production concerns:
 """
 import json
 import logging
+
+from botocore import history
 from llm import llm_client
 from mcp.base import BaseMCPServer
 from db.repositories.observability_repo import observability_repo
@@ -40,6 +42,7 @@ class BaseAgent:
         user_message: str,
         session_id: str,
         context: dict | None = None,
+        history: list[dict] | None = None,
     ) -> dict:
         """
         Execute the agent with full async tool-use loop.
@@ -66,7 +69,18 @@ class BaseAgent:
             system += f"\n\nContext:\n{json.dumps(context, indent=2, default=str)}"
 
         # Start the conversation
-        messages = [{"role": "user", "content": user_message}]
+        messages = []
+        if history:
+            for msg in history[:-1]:           # exclude the current message (already in history)
+                if msg["role"] in ("user", "assistant"):
+                    messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"],
+                    })
+
+        # Add the current message
+        messages.append({"role": "user", "content": user_message})
+
         tools = self.mcp_server.get_tool_specs()
 
         # Accumulators

@@ -14,6 +14,7 @@ Checks (in order):
 """
 import time
 import logging
+from urllib import request, response
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -68,6 +69,11 @@ class EdgeLayerMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         # ── 4. Security headers ───────────────────────
+        
+        # ── 4. Security headers ───────────────────────
+        path = request.url.path
+        if path not in ("/", "/docs", "/openapi.json", "/redoc"):
+            response.headers["Content-Security-Policy"] = "default-src 'self'"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -75,7 +81,6 @@ class EdgeLayerMiddleware(BaseHTTPMiddleware):
             "max-age=31536000; includeSubDomains"
         )
         response.headers["Cache-Control"] = "no-store"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
 
         # ── 5. Log request ────────────────────────────
         duration = (time.time() - start_time) * 1000
