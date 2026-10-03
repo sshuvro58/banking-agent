@@ -17,12 +17,12 @@ class Database:
     """Manages an asyncpg connection pool for the whole app."""
 
     def __init__(self):
-        print("Calling Database.__init__")
+        logger.debug("Calling Database.__init__")
         self.pool: asyncpg.Pool | None = None
 
     async def connect(self):
         """Create the connection pool. Call once at startup."""
-        print("Calling Database.connect")
+        logger.debug("Calling Database.connect")
         self.pool = await asyncpg.create_pool(
             host=db_config.host,
             port=db_config.port,
@@ -36,32 +36,32 @@ class Database:
 
     async def disconnect(self):
         """Close the pool. Call on shutdown."""
-        print("Calling Database.disconnect")
+        logger.debug("Calling Database.disconnect")
         if self.pool:
             await self.pool.close()
             logger.info("[DB] Pool closed")
 
     async def execute(self, query: str, *args) -> str:
         """Run a query that doesn't return rows (INSERT, UPDATE, DELETE)."""
-        print("Calling Database.execute")
+        logger.debug("Calling Database.execute")
         async with self.pool.acquire() as conn:
             return await conn.execute(query, *args)
 
     async def fetch(self, query: str, *args) -> list[asyncpg.Record]:
         """Run a query and return all rows."""
-        print("Calling Database.fetch")
+        logger.debug("Calling Database.fetch")
         async with self.pool.acquire() as conn:
             return await conn.fetch(query, *args)
 
     async def fetchrow(self, query: str, *args) -> asyncpg.Record | None:
         """Run a query and return one row (or None)."""
-        print("Calling Database.fetchrow")
+        logger.debug("Calling Database.fetchrow")
         async with self.pool.acquire() as conn:
             return await conn.fetchrow(query, *args)
 
     async def fetchval(self, query: str, *args):
         """Run a query and return a single value."""
-        print("Calling Database.fetchval")
+        logger.debug("Calling Database.fetchval")
         async with self.pool.acquire() as conn:
             return await conn.fetchval(query, *args)
 

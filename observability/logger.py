@@ -6,9 +6,10 @@ This handles the console/stdout side.
 """
 import logging
 import psutil
+from config import app_config
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG if app_config.is_dev else logging.INFO,
     format="%(asctime)s | %(name)-18s | %(levelname)-5s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )

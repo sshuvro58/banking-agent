@@ -17,25 +17,35 @@ Production concerns:
   - Structured error handling from MCP tools
   - Context injection via system prompt
 """
+"""
+Base Agent — async tool-use loop WITH human-in-the-loop support.
+
+Changes from the original:
+  - Before executing a tool, checks if it needs approval
+  - If yes: creates an approval_request, tells the LLM it's pending
+  - The LLM then asks the user to confirm
+  - On the next turn, coordinator detects the approval and executes
+"""
 import json
 import logging
-
-from botocore import history
 from llm import llm_client
 from mcp.base import BaseMCPServer
 from db.repositories.observability_repo import observability_repo
+from db.repositories.approval_repo import approval_repo
+from agents.hilt_config import needs_approval, get_approver_type
+
 
 logger = logging.getLogger("agent")
 
-MAX_TOOL_ROUNDS = 5  # Safety limit — prevent runaway loops
+MAX_TOOL_ROUNDS = 5
 
 
 class BaseAgent:
-    def __init__(self, name: str, system_prompt: str, mcp_server: BaseMCPServer):
-        print("Calling BaseAgent.__init__")
+    def __init__(self, name: str, system_prompt: str, mcp_server: BaseMCPServer, model_id: str | None = None):
         self.name = name
         self.system_prompt = system_prompt
         self.mcp_server = mcp_server
+        self.model_id = model_id
 
     async def run(
         self,
@@ -44,46 +54,20 @@ class BaseAgent:
         context: dict | None = None,
         history: list[dict] | None = None,
     ) -> dict:
-        """
-        Execute the agent with full async tool-use loop.
-
-        Parameters
-        ----------
-        user_message : str
-            What the user asked (already PII-redacted).
-        session_id : str
-            For cost tracking and trace attribution.
-        context : dict | None
-            Injected into the system prompt. Contains customer_id,
-            account_ids, and any prior agent context.
-
-        Returns
-        -------
-        dict with: reply, tool_calls, total_input_tokens,
-                   total_output_tokens, total_latency_ms
-        """
-        # Build system prompt with context
-        print("Calling BaseAgent.run")
         system = self.system_prompt
         if context:
             system += f"\n\nContext:\n{json.dumps(context, indent=2, default=str)}"
 
-        # Start the conversation
+        # Build messages from history
         messages = []
         if history:
-            for msg in history[:-1]:           # exclude the current message (already in history)
+            for msg in history[:-1]:
                 if msg["role"] in ("user", "assistant"):
-                    messages.append({
-                        "role": msg["role"],
-                        "content": msg["content"],
-                    })
-
-        # Add the current message
+                    messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": user_message})
 
         tools = self.mcp_server.get_tool_specs()
 
-        # Accumulators
         all_tool_calls = []
         total_input = 0
         total_output = 0
@@ -93,12 +77,12 @@ class BaseAgent:
         for round_num in range(MAX_TOOL_ROUNDS):
             logger.info(f"[{self.name}] Round {round_num + 1}/{MAX_TOOL_ROUNDS}")
 
-            # ── Step 1: Call the LLM ──────────────────
             response = llm_client.invoke(
                 messages=messages,
                 system_prompt=system,
                 tools=tools if tools else None,
                 session_id=session_id,
+                model_override=self.model_id,
             )
 
             total_input += response["input_tokens"]
@@ -106,7 +90,6 @@ class BaseAgent:
             total_latency += response["latency_ms"]
             total_cost += response["estimated_cost"]
 
-            # Record cost to database
             await observability_repo.record_cost(
                 session_id=session_id,
                 model=response["model"],
@@ -115,66 +98,159 @@ class BaseAgent:
                 estimated_cost=response["estimated_cost"],
             )
 
-            # ── Step 2a: LLM wants to use tools ──────
+            # ── Guardrail blocked ─────────────────────
+            if response["stop_reason"] == "guardrail":
+                return {
+                    "reply": response["reply"],
+                    "tool_calls": all_tool_calls,
+                    "total_input_tokens": total_input,
+                    "total_output_tokens": total_output,
+                    "total_latency_ms": total_latency,
+                    "total_cost": total_cost,
+                }
+
+            # ── Tool use ────────needs_approval──────────────────────
             if response["tool_uses"]:
                 logger.info(
                     f"[{self.name}] LLM requested {len(response['tool_uses'])} tool(s): "
                     f"{[tu['name'] for tu in response['tool_uses']]}"
                 )
 
-                # Add assistant's tool-call message to conversation
                 assistant_msg = llm_client.build_assistant_message(response["tool_uses"])
                 messages.append(assistant_msg)
 
-                # Execute each tool and collect results
                 tool_results = []
+                approval_created = False
+
                 for tool_use in response["tool_uses"]:
                     tool_name = tool_use["name"]
                     tool_args = tool_use["arguments"]
                     tool_id = tool_use["id"]
 
-                    logger.info(f"[{self.name}] Executing: {tool_name}({json.dumps(tool_args)})")
+                    # ── HITL CHECK ────────────────────
+                    if needs_approval(tool_name):
+                        approver = get_approver_type(tool_name)
+                        customer_id = (context or {}).get("customer_id", "unknown")
 
-                    # Call the MCP tool (async — queries PostgreSQL)
-                    result = await self.mcp_server.call_tool(tool_name, tool_args)
+                        # Create pending approval
+                        approval = await approval_repo.create_request(
+                            session_id=session_id,
+                            customer_id=customer_id,
+                            action=tool_name,
+                            agent=self.name,
+                            tool_name=tool_name,
+                            tool_arguments=tool_args,
+                        )
 
-                    # Track for response metadata
-                    all_tool_calls.append({
-                        "tool": tool_name,
-                        "input": tool_args,
-                        "success": result.success,
-                        "error_type": result.error_type.value if result.error_type else None,
-                        "execution_ms": result.execution_ms,
-                        "round": round_num,
-                    })
-
-                    # Build the result string for the LLM
-                    if result.success:
-                        result_str = json.dumps(result.data, default=str)
-                    else:
-                        result_str = json.dumps({
-                            "error": result.error,
-                            "error_type": result.error_type.value if result.error_type else "unknown",
+                        all_tool_calls.append({
+                            "tool": tool_name,
+                            "input": tool_args,
+                            "success": False,
+                            "status": "pending_approval",
+                            "approval_id": approval["approval_id"],
+                            "approver": approver,
+                            "round": round_num,
                         })
 
-                    tool_results.append({
-                        "id": tool_id,
-                        "name": tool_name,
-                        "result": result_str,
-                        "is_error": not result.success,
-                    })
+                        # Tell the LLM the action is pending approval
+                        if approver == "customer":
+                            pending_msg = (
+                                f"Action '{tool_name}' requires customer confirmation before execution. "
+                                f"Approval ID: {approval['approval_id']}. "
+                                f"Please ask the customer to confirm they want to proceed with: "
+                                f"{json.dumps(tool_args, default=str)}. "
+                                f"Do NOT execute the action — just ask for confirmation."
+                            )
+                        else:
+                            pending_msg = (
+                                f"Action '{tool_name}' requires approval from a bank employee. "
+                                f"Approval ID: {approval['approval_id']}. "
+                                f"Tell the customer their request has been submitted for review "
+                                f"and they will be notified once approved."
+                            )
 
-                # Add tool results to conversation
+                        tool_results.append({
+                            "id": tool_id,
+                            "name": tool_name,
+                            "result": json.dumps({
+                                "status": "pending_approval",
+                                "approval_id": approval["approval_id"],
+                                "message": pending_msg,
+                            }),
+                            "is_error": False,
+                        })
+                        approval_created = True
+                        logger.info(
+                            f"[{self.name}] HITL: {tool_name} needs {approver} approval "
+                            f"(approval_id={approval['approval_id']})"
+                        )
+
+                    else:
+                        # ── Normal execution (no approval needed) ──
+                        logger.info(f"[{self.name}] Executing: {tool_name}")
+                        result = await self.mcp_server.call_tool(tool_name, tool_args)
+
+                        all_tool_calls.append({
+                            "tool": tool_name,
+                            "input": tool_args,
+                            "success": result.success,
+                            "error_type": result.error_type.value if result.error_type else None,
+                            "execution_ms": result.execution_ms,
+                            "round": round_num,
+                        })
+
+                        result_str = json.dumps(
+                            result.data if result.success else {"error": result.error},
+                            default=str,
+                        )
+                        tool_results.append({
+                            "id": tool_id,
+                            "name": tool_name,
+                            "result": result_str,
+                            "is_error": not result.success,
+                        })
+
                 result_messages = llm_client.build_tool_result_messages(tool_results)
                 messages.extend(result_messages)
 
-                # Go back to step 1 — let LLM process the results
+                # If we created an approval, let the LLM generate the
+                # confirmation message and return — don't loop again
+                if approval_created:
+                    confirm_response = llm_client.invoke(
+                        messages=messages,
+                        system_prompt=system,
+                        tools=tools,        
+                        session_id=session_id,
+                        model_override=self.model_id,
+                    )
+                    total_input += confirm_response["input_tokens"]
+                    total_output += confirm_response["output_tokens"]
+                    total_latency += confirm_response["latency_ms"]
+                    total_cost += confirm_response["estimated_cost"]
+
+                    await observability_repo.record_trace(
+                        session_id=session_id,
+                        agent=self.name,
+                        action="pending_approval",
+                        tool_calls=all_tool_calls,
+                        input_tokens=total_input,
+                        output_tokens=total_output,
+                        latency_ms=total_latency,
+                    )
+
+                    return {
+                        "reply": confirm_response["reply"] or "Your request needs confirmation. Please approve or reject.",
+                        "tool_calls": all_tool_calls,
+                        "total_input_tokens": total_input,
+                        "total_output_tokens": total_output,
+                        "total_latency_ms": total_latency,
+                        "total_cost": total_cost,
+                        "pending_approval": True,
+                    }
+
                 continue
 
-            # ── Step 2b: LLM gave a final text reply ─
-            logger.info(f"[{self.name}] Complete — {len(all_tool_calls)} tool call(s) total")
-
-            # Record trace to database
+            # ── Final text reply ──────────────────────
             await observability_repo.record_trace(
                 session_id=session_id,
                 agent=self.name,
@@ -194,25 +270,66 @@ class BaseAgent:
                 "total_cost": total_cost,
             }
 
-        # ── Hit max rounds ────────────────────────────
-        logger.warning(f"[{self.name}] Hit max rounds ({MAX_TOOL_ROUNDS})")
-
-        await observability_repo.record_trace(
-            session_id=session_id,
-            agent=self.name,
-            action="max_rounds_exceeded",
-            tool_calls=all_tool_calls,
-            input_tokens=total_input,
-            output_tokens=total_output,
-            latency_ms=total_latency,
-            error=f"Exceeded {MAX_TOOL_ROUNDS} tool rounds",
-        )
-
         return {
-            "reply": "I've reached the maximum number of steps. Please try rephrasing your request.",
+            "reply": "I've reached the maximum number of steps. Please try rephrasing.",
             "tool_calls": all_tool_calls,
             "total_input_tokens": total_input,
             "total_output_tokens": total_output,
             "total_latency_ms": total_latency,
             "total_cost": total_cost,
         }
+
+    async def execute_approved_tool(
+        self,
+        tool_name: str,
+        tool_arguments: dict,
+        session_id: str,
+        context: dict | None = None,
+    ) -> dict:
+        """
+        Execute a previously approved tool call.
+        Called by the coordinator after the user approves.
+        """
+        logger.info(f"[{self.name}] Executing approved tool: {tool_name}")
+
+        result = await self.mcp_server.call_tool(tool_name, tool_arguments)
+
+        await observability_repo.record_trace(
+            session_id=session_id,
+            agent=self.name,
+            action=f"executed_approved:{tool_name}",
+            tool_calls=[{
+                "tool": tool_name,
+                "input": tool_arguments,
+                "success": result.success,
+            }],
+        )
+
+        if result.success:
+            # Ask LLM to format the result nicely
+            system = self.system_prompt
+            if context:
+                system += f"\n\nContext:\n{json.dumps(context, indent=2, default=str)}"
+
+            response = llm_client.invoke(
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"The customer approved the action '{tool_name}' and it has been executed. "
+                        f"Here is the result:\n{json.dumps(result.data, default=str)}\n\n"
+                        f"Summarize what was done and provide the request ID and next steps."
+                    ),
+                }],
+                system_prompt=system,
+                session_id=session_id,
+                model_override=self.model_id,
+            )
+            return {
+                "reply": response["reply"],
+                "success": True,
+            }
+        else:
+            return {
+                "reply": f"Sorry, the action failed: {result.error}",
+                "success": False,
+            }

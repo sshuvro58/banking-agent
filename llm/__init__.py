@@ -14,14 +14,17 @@ Change provider by editing .env:
     LLM_PROVIDER=openrouter  → OpenRouter (default)
     LLM_PROVIDER=bedrock     → AWS Bedrock
 """
+import logging
 from config import llm_config
 from llm.base_client import BaseLLMClient
+
+logger = logging.getLogger("llm")
 
 
 def create_llm_client() -> BaseLLMClient:
     """Factory: reads LLM_PROVIDER from config and returns the right client."""
 
-    print("Calling create_llm_client")
+    logger.debug("Calling create_llm_client")
     provider = llm_config.provider
 
     if provider == "openrouter":

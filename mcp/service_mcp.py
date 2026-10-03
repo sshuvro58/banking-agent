@@ -9,12 +9,15 @@ Pattern:
   4. Raises ValueError for expected errors (not found, bad input)
   5. Register the handler with name, description, parameters
 """
+import logging
 from mcp.base import BaseMCPServer
 from db.repositories.service_repo import service_repo
 
+logger = logging.getLogger("mcp.service")
+
 async def _change_address(customer_id: str, new_address: str) -> dict:
     """Change the address for a specific account."""
-    print("Calling _change_address")
+    logger.debug("Calling _change_address")
     if not customer_id:
         raise ValueError("customer_id is required")
     if not new_address:
@@ -23,7 +26,7 @@ async def _change_address(customer_id: str, new_address: str) -> dict:
 
 async def _request_checkbook(customer_id: str, account_id: str, pages: int) -> dict:
     """Request a checkbook for a specific account."""
-    print("Calling _request_checkbook")
+    logger.debug("Calling _request_checkbook")
     if not customer_id:
         raise ValueError("customer_id is required")
     if not account_id:
@@ -32,7 +35,7 @@ async def _request_checkbook(customer_id: str, account_id: str, pages: int) -> d
 
 async def _update_kyc(customer_id:str,document_type:str,document_number:str) -> dict:
     """Update KYC information for a specific customer."""
-    print("Calling _update_kyc")
+    logger.debug("Calling _update_kyc")
     if not customer_id:
         raise ValueError("customer_id is required")
     if not document_type:

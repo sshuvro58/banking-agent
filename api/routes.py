@@ -14,9 +14,13 @@ The /chat endpoint flow:
   7. Store assistant response
   8. Return reply + session_id + agent_used + cost
 """
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from db.connection import db
+import logging  
 from pydantic import BaseModel
 from typing import Optional
+
+from starlette.responses import JSONResponse
 
 from security.authentication import create_token, verify_token
 from security.pii_redaction import pii_redactor
@@ -125,6 +129,11 @@ async def chat(req: ChatRequest, user_claims: dict = Depends(verify_token)):
 
 # ── Admin endpoints (observability) ───────────────────
 
+def verify_admin(claims: dict = Depends(verify_token)):
+    if "admin" not in claims.get("roles", []):
+        raise HTTPException(403, "Admin access required")
+    return claims
+
 @router.get("/admin/traces/{session_id}")
 async def get_session_traces(session_id: str):
     """View all agent traces for a session."""
@@ -133,7 +142,7 @@ async def get_session_traces(session_id: str):
 
 
 @router.get("/admin/traces")
-async def get_all_traces():
+async def get_all_traces(admin: dict = Depends(verify_admin)):
     """View recent traces across all sessions."""
     traces = await observability_repo.get_all_traces()
     return {"traces": traces}
@@ -164,6 +173,91 @@ async def get_chat_history(session_id: str):
     return {"session_id": session_id, "messages": history}
 
 
+"""
+Approval API Routes — add these to your existing api/routes.py
+
+These endpoints are for bank employees to manage approval requests
+that require employee review (like KYC updates).
+"""
+
+# ── Add to your imports in routes.py ──────────────────
+# from db.repositories.approval_repo import approval_repo
+
+
+# ── Add these routes ──────────────────────────────────
+
+@router.get("/admin/approvals/pending")
+async def list_pending_approvals():
+    """List all pending approval requests across all sessions."""
+    rows = await db.fetch(
+        """
+        SELECT a.approval_id, a.customer_id, c.name as customer_name,
+               a.action, a.tool_name, a.tool_arguments,
+               a.status, a.requested_at, a.expires_at
+        FROM banking.approval_requests a
+        JOIN banking.customers c ON a.customer_id = c.customer_id
+        WHERE a.status = 'pending' AND a.expires_at > NOW()
+        ORDER BY a.requested_at ASC
+        """,
+    )
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["requested_at"] = str(d["requested_at"])
+        d["expires_at"] = str(d["expires_at"])
+        results.append(d)
+    return {"pending": results, "count": len(results)}
+
+
+@router.post("/admin/approvals/{approval_id}/approve")
+async def approve_request(approval_id: str):
+    """Bank employee approves an action."""
+    result = await approval_repo.approve(approval_id, decided_by="employee")
+    if not result:
+        raise HTTPException(404, "Approval request not found or already decided")
+    return {"status": "approved", "approval_id": approval_id}
+
+
+@router.post("/admin/approvals/{approval_id}/reject")
+async def reject_request(approval_id: str):
+    """Bank employee rejects an action."""
+    result = await approval_repo.reject(approval_id, decided_by="employee")
+    if not result:
+        raise HTTPException(404, "Approval request not found or already decided")
+    return {"status": "rejected", "approval_id": approval_id}
+
+
+@router.get("/admin/approvals/history")
+async def approval_history():
+    """View all approval requests (pending, approved, rejected, expired)."""
+    rows = await db.fetch(
+        """
+        SELECT a.approval_id, a.customer_id, c.name as customer_name,
+               a.action, a.tool_name, a.status,
+               a.requested_at, a.decided_at, a.decided_by
+        FROM banking.approval_requests a
+        JOIN banking.customers c ON a.customer_id = c.customer_id
+        ORDER BY a.requested_at DESC
+        LIMIT 50
+        """,
+    )
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["requested_at"] = str(d["requested_at"])
+        if d.get("decided_at"):
+            d["decided_at"] = str(d["decided_at"])
+        results.append(d)
+    return {"history": results}
+
+
 @router.get("/health")
 async def health():
-    return {"status": "healthy"}
+    try:
+        await db.fetchval("SELECT 1")
+        return {"status": "healthy", "database": "connected"}
+    except Exception:
+        return JSONResponse(
+            {"status": "unhealthy", "database": "disconnected"},
+            status_code=503,
+        )

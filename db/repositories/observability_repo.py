@@ -3,7 +3,10 @@ Observability Repository — tracking for agent traces, token costs, and audit l
 Used across coordinator and worker agents for system telemetry[cite: 1].
 """
 import json
+import logging
 from db.connection import db
+
+logger = logging.getLogger("observability_repo")
 
 
 class ObservabilityRepo:
@@ -20,7 +23,7 @@ class ObservabilityRepo:
         error: str | None = None,
     ) -> int:
         """Insert an agent trace event and return the generated trace_id[cite: 1]."""
-        print("Calling ObservabilityRepo.record_trace")
+        logger.debug("Calling ObservabilityRepo.record_trace")
         tool_calls_json = json.dumps(tool_calls or [])
         trace_id = await db.fetchval(
             """
@@ -44,7 +47,7 @@ class ObservabilityRepo:
 
     async def get_session_traces(self, session_id: str) -> list[dict]:
         """Fetch all traces for a specific session ordered chronologically[cite: 1]."""
-        print("Calling ObservabilityRepo.get_session_traces")
+        logger.debug("Calling ObservabilityRepo.get_session_traces")
         rows = await db.fetch(
             """
             SELECT trace_id, session_id, agent, action, tool_calls,
@@ -67,7 +70,7 @@ class ObservabilityRepo:
 
     async def get_all_traces(self, limit: int = 100) -> list[dict]:
         """Fetch system-wide traces ordered by most recent first[cite: 1]."""
-        print("Calling ObservabilityRepo.get_all_traces")
+        logger.debug("Calling ObservabilityRepo.get_all_traces")
         rows = await db.fetch(
             """
             SELECT trace_id, session_id, agent, action, tool_calls,
@@ -97,7 +100,7 @@ class ObservabilityRepo:
         estimated_cost: float,
     ) -> int:
         """Insert a cost tracking record and return the cost_id[cite: 1]."""
-        print("Calling ObservabilityRepo.record_cost")
+        logger.debug("Calling ObservabilityRepo.record_cost")
         cost_id = await db.fetchval(
             """
             INSERT INTO banking.cost_records (
@@ -116,7 +119,7 @@ class ObservabilityRepo:
 
     async def get_session_cost(self, session_id: str) -> dict:
         """Aggregate token usage and monetary cost for a given session[cite: 1]."""
-        print("Calling ObservabilityRepo.get_session_cost")
+        logger.debug("Calling ObservabilityRepo.get_session_cost")
         row = await db.fetchrow(
             """
             SELECT
@@ -139,7 +142,7 @@ class ObservabilityRepo:
 
     async def get_total_cost(self) -> dict:
         """Aggregate token usage and overall cost across all recorded sessions[cite: 1]."""
-        print("Calling ObservabilityRepo.get_total_cost")
+        logger.debug("Calling ObservabilityRepo.get_total_cost")
         row = await db.fetchrow(
             """
             SELECT
@@ -162,7 +165,7 @@ class ObservabilityRepo:
         ip_address: str | None = None,
     ) -> None:
         """Write an entry to the system audit trail[cite: 1]."""
-        print("Calling ObservabilityRepo.audit")
+        logger.debug("Calling ObservabilityRepo.audit")
         details_json = json.dumps(details or {})
         await db.execute(
             """

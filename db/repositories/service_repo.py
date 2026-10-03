@@ -4,7 +4,10 @@ Handles customer service workflows including address updates, KYC changes, and c
 """
 import json
 import uuid
+import logging
 from db.connection import db
+
+logger = logging.getLogger("service_repo")
 
 
 class ServiceRepo:
@@ -18,7 +21,7 @@ class ServiceRepo:
         status: str = "submitted",
     ) -> dict:
         """Insert a service request using a generated request ID and return the record[cite: 1]."""
-        print("Calling ServiceRepo.create_request")
+        logger.debug("Calling ServiceRepo.create_request")
         request_id = f"req_{uuid.uuid4().hex[:12]}"
         details_json = json.dumps(details)
 
@@ -49,7 +52,7 @@ class ServiceRepo:
 
     async def change_address(self, customer_id: str, new_address: str) -> dict:
         """Fetch old address, update customer record, and create an audit service request[cite: 1]."""
-        print("Calling ServiceRepo.change_address")
+        logger.debug("Calling ServiceRepo.change_address")
         old_address = await db.fetchval(
             "SELECT address FROM banking.customers WHERE customer_id = $1",
             customer_id,
@@ -81,7 +84,7 @@ class ServiceRepo:
         self, customer_id: str, account_id: str, pages: int = 25
     ) -> dict:
         """Verify account ownership and create a chequebook service request[cite: 1]."""
-        print("Calling ServiceRepo.request_chequebook")
+        logger.debug("Calling ServiceRepo.request_chequebook")
         owner_id = await db.fetchval(
             "SELECT customer_id FROM banking.accounts WHERE account_id = $1",
             account_id,
@@ -104,7 +107,7 @@ class ServiceRepo:
         self, customer_id: str, doc_type: str, doc_number: str
     ) -> dict:
         """Fetch current KYC status, set status to under_review, and log the request[cite: 1]."""
-        print("Calling ServiceRepo.update_kyc")
+        logger.debug("Calling ServiceRepo.update_kyc")
         current_status = await db.fetchval(
             "SELECT kyc_status FROM banking.customers WHERE customer_id = $1",
             customer_id,
@@ -135,7 +138,7 @@ class ServiceRepo:
 
     async def get_requests(self, customer_id: str, limit: int = 10) -> list[dict]:
         """Fetch recent service requests filed by the customer[cite: 1]."""
-        print("Calling ServiceRepo.get_requests")
+        logger.debug("Calling ServiceRepo.get_requests")
         rows = await db.fetch(
             """
             SELECT request_id, customer_id, account_id, type, status,

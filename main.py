@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 
 from api.routes import router
 from api.middleware.edge_layer import EdgeLayerMiddleware
+from api.middleware.edge_layer import TimeoutMiddleware
 from db.connection import db
 
 
@@ -41,6 +42,7 @@ app = FastAPI(
 
 # ── Edge layer (WAF, security headers) ────────────────
 app.add_middleware(EdgeLayerMiddleware)
+app.add_middleware(TimeoutMiddleware)
 
 # ── API routes ────────────────────────────────────────
 app.include_router(router, prefix="/api")

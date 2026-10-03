@@ -54,7 +54,7 @@ class BaseMCPServer:
     TOOL_TIMEOUT_SECONDS = 10  # kill tool calls that take too long
 
     def __init__(self, server_name: str):
-        print("Calling BaseMCPServer.__init__")
+        logger.debug("Calling BaseMCPServer.__init__")
         self.server_name = server_name
         self._tools: dict[str, dict] = {}
         self._handlers: dict[str, Callable] = {}
@@ -82,7 +82,7 @@ class BaseMCPServer:
         handler : Callable
             Async function that executes the tool
         """
-        print("Calling BaseMCPServer.register_tool")
+        logger.debug("Calling BaseMCPServer.register_tool")
         self._tools[name] = {
             "name": name,
             "description": description,
@@ -93,7 +93,7 @@ class BaseMCPServer:
 
     def list_tools(self) -> list[dict]:
         """Return raw tool definitions."""
-        print("Calling BaseMCPServer.list_tools")
+        logger.debug("Calling BaseMCPServer.list_tools")
         return list(self._tools.values())
 
     def get_tool_specs(self) -> list[dict]:
@@ -102,7 +102,7 @@ class BaseMCPServer:
         The LLM client's Bedrock implementation converts this
         to Bedrock format internally — we don't need to care.
         """
-        print("Calling BaseMCPServer.get_tool_specs")
+        logger.debug("Calling BaseMCPServer.get_tool_specs")
         return [
             BaseLLMClient.build_tool_spec(
                 name=t["name"],
@@ -118,7 +118,7 @@ class BaseMCPServer:
 
         This is the method agents call after the LLM decides to use a tool.
         """
-        print("Calling BaseMCPServer.call_tool")
+        logger.debug("Calling BaseMCPServer.call_tool")
         handler = self._handlers.get(tool_name)
         if not handler:
             logger.warning(f"[MCP:{self.server_name}] Unknown tool: {tool_name}")

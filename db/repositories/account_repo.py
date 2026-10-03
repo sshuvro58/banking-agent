@@ -2,14 +2,17 @@
 Account Repository — queries for balance enquiries and account listings.
 Used later by the Accounts MCP Server.
 """
+import logging
 from db.connection import db
+
+logger = logging.getLogger("account_repo")
 
 
 class AccountRepo:
 
     async def get_balance(self, account_id: str) -> dict | None:
         """Get balance for a specific account."""
-        print("Calling AccountRepo.get_balance")
+        logger.debug("Calling AccountRepo.get_balance")
         row = await db.fetchrow(
             """
             SELECT account_id, customer_id, type, balance,
@@ -27,7 +30,7 @@ class AccountRepo:
 
     async def list_by_customer(self, customer_id: str) -> list[dict]:
         """List all accounts belonging to a customer."""
-        print("Calling AccountRepo.list_by_customer")
+        logger.debug("Calling AccountRepo.list_by_customer")
         rows = await db.fetch(
             """
             SELECT account_id, type, balance, currency, status, opened_date
@@ -47,7 +50,7 @@ class AccountRepo:
 
     async def verify_ownership(self, account_id: str, customer_id: str) -> bool:
         """Check if an account belongs to a customer."""
-        print("Calling AccountRepo.verify_ownership")
+        logger.debug("Calling AccountRepo.verify_ownership")
         owner = await db.fetchval(
             "SELECT customer_id FROM banking.accounts WHERE account_id = $1",
             account_id,

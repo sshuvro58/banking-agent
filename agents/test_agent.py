@@ -16,8 +16,11 @@ You'll see the agent:
 """
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger("test_agent")
 
 # Allow running this file directly (`python agents/test_agent.py`) even though
 # it lives in a subdirectory — Python only puts the script's own folder on
@@ -31,7 +34,7 @@ from mcp.accounts_mcp import accounts_mcp
 
 async def test_agent_with_tools():
     """Test: agent calls tools and gets a real answer."""
-    print("Calling test_agent_with_tools")
+    logger.debug("Calling test_agent_with_tools")
     print("=" * 60)
     print("  Test 1: Agent with tool use")
     print("=" * 60)
@@ -79,7 +82,7 @@ async def test_agent_with_tools():
 
 async def test_agent_error_handling():
     """Test: agent handles tool errors gracefully."""
-    print("Calling test_agent_error_handling")
+    logger.debug("Calling test_agent_error_handling")
     print("=" * 60)
     print("  Test 2: Agent error handling")
     print("=" * 60)
@@ -118,7 +121,7 @@ async def test_agent_error_handling():
 
 async def test_cost_tracking():
     """Test: verify costs were recorded in database."""
-    print("Calling test_cost_tracking")
+    logger.debug("Calling test_cost_tracking")
     print("=" * 60)
     print("  Test 3: Cost tracking in database")
     print("=" * 60)
@@ -140,7 +143,7 @@ async def test_cost_tracking():
 
 
 async def main():
-    print("Calling main")
+    logger.debug("Calling main")
     await test_agent_with_tools()
     await test_agent_error_handling()
     await test_cost_tracking()

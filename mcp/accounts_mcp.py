@@ -9,8 +9,11 @@ Pattern:
   4. Raises ValueError for expected errors (not found, bad input)
   5. Register the handler with name, description, parameters
 """
+import logging
 from mcp.base import BaseMCPServer
 from db.repositories.account_repo import account_repo
+
+logger = logging.getLogger("mcp.accounts")
 
 
 # ── Tool handlers ─────────────────────────────────────
@@ -20,7 +23,7 @@ from db.repositories.account_repo import account_repo
 
 async def _balance_enquiry(account_id: str) -> dict:
     """Look up the balance for a given account."""
-    print("Calling _balance_enquiry")
+    logger.debug("Calling _balance_enquiry")
     result = await account_repo.get_balance(account_id)
     if not result:
         raise ValueError(f"Account {account_id} not found")
@@ -29,7 +32,7 @@ async def _balance_enquiry(account_id: str) -> dict:
 
 async def _list_accounts(customer_id: str) -> dict:
     """List all accounts for a customer."""
-    print("Calling _list_accounts")
+    logger.debug("Calling _list_accounts")
     accounts = await account_repo.list_by_customer(customer_id)
     if not accounts:
         raise ValueError(f"No accounts found for customer {customer_id}")

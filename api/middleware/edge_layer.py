@@ -17,7 +17,7 @@ import logging
 from urllib import request, response
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-
+import asyncio
 logger = logging.getLogger("edge_layer")
 
 # In production: maintained by security team, fed by threat intel
@@ -91,3 +91,15 @@ class EdgeLayerMiddleware(BaseHTTPMiddleware):
         )
 
         return response
+
+
+class TimeoutMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=60)
+        except asyncio.TimeoutError:
+            return Response(
+                content='{"detail":"Request timed out"}',
+                status_code=504,
+                media_type="application/json",
+            )

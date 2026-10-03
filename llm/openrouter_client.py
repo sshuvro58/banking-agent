@@ -27,7 +27,7 @@ DEFAULT_PRICING = {"input": 1.0, "output": 2.0}
 
 class OpenRouterClient(BaseLLMClient):
     def __init__(self):
-        print("Calling OpenRouterClient.__init__")
+        logger.debug("Calling OpenRouterClient.__init__")
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=llm_config.api_key,
@@ -44,7 +44,7 @@ class OpenRouterClient(BaseLLMClient):
         """Send a conversation to OpenRouter and return parsed response."""
 
         # Build messages list
-        print("Calling OpenRouterClient.invoke")
+        logger.debug("Calling OpenRouterClient.invoke")
         full_messages = []
         if system_prompt:
             full_messages.append({"role": "system", "content": system_prompt})
@@ -143,7 +143,7 @@ class OpenRouterClient(BaseLLMClient):
         }
 
 def build_assistant_message(self, tool_uses):
-    print("Calling build_assistant_message")
+    logger.debug("Calling build_assistant_message")
     return {
         "role": "assistant",
         "tool_calls": [
@@ -154,7 +154,7 @@ def build_assistant_message(self, tool_uses):
     }
 
 def build_tool_result_messages(self, tool_results):
-    print("Calling build_tool_result_messages")
+    logger.debug("Calling build_tool_result_messages")
     return [
         {"role": "tool", "tool_call_id": tr["id"], "content": tr["result"]}
         for tr in tool_results

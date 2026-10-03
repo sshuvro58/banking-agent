@@ -10,12 +10,15 @@ Pattern:
   5. Register the handler with name, description, parameters
 """
 
+import logging
 from mcp.base import BaseMCPServer
-from db.repositories.transaction_repo import transaction_repo   
+from db.repositories.transaction_repo import transaction_repo
+
+logger = logging.getLogger("mcp.transactions")
 
 async def _get_transaction(account_id: str, limit: int = 10, category: str = "") -> list[dict]:
     """Get recent transactions for an account, optionally filtered by category."""
-    print("Calling _get_transaction")
+    logger.debug("Calling _get_transaction")
     if not account_id:
         raise ValueError("account_id is required")
     if limit < 1:
@@ -25,7 +28,7 @@ async def _get_transaction(account_id: str, limit: int = 10, category: str = "")
 
 async def _get_statement(account_id: str, month: int | None = None, year: int | None = None) -> dict:
     """Generate an account statement for a given month and year."""
-    print("Calling _get_statement")
+    logger.debug("Calling _get_statement")
     if not account_id:
         raise ValueError("account_id is required")
     return await transaction_repo.get_statement(account_id, month=month, year=year) 

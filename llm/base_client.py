@@ -4,8 +4,11 @@ Base LLM Client — the interface all providers must implement.
 Every provider (OpenRouter, Bedrock, Ollama, etc.) implements this
 same interface, so the agents don't care which provider is running.
 """
+import logging
 from abc import ABC, abstractmethod
 from typing import Optional
+
+logger = logging.getLogger("llm.base")
 
 
 class BaseLLMClient(ABC):
@@ -25,7 +28,7 @@ class BaseLLMClient(ABC):
             reply, tool_uses, stop_reason, input_tokens,
             output_tokens, estimated_cost, latency_ms, model
         """
-        print("Calling BaseLLMClient.invoke")
+        logger.debug("Calling BaseLLMClient.invoke")
         pass
 
     @abstractmethod
@@ -46,7 +49,7 @@ class BaseLLMClient(ABC):
         -------
         dict — a message in the provider's format
         """
-        print("Calling BaseLLMClient.build_assistant_message")
+        logger.debug("Calling BaseLLMClient.build_assistant_message")
         pass
 
     @abstractmethod
@@ -68,13 +71,13 @@ class BaseLLMClient(ABC):
         -------
         list[dict] — messages in the provider's format
         """
-        print("Calling BaseLLMClient.build_tool_result_messages")
+        logger.debug("Calling BaseLLMClient.build_tool_result_messages")
         pass
 
     @staticmethod
     def build_tool_spec(name: str, description: str, parameters: dict) -> dict:
         """Build a tool definition in OpenAI function-calling format."""
-        print("Calling BaseLLMClient.build_tool_spec")
+        logger.debug("Calling BaseLLMClient.build_tool_spec")
         return {
             "type": "function",
             "function": {
@@ -95,6 +98,7 @@ class BaseLLMClient(ABC):
         system_prompt: str = "",
         tools: Optional[list[dict]] = None,
         session_id: str = "",
+        
     ) -> dict:
         """
         Send a conversation to the LLM.
@@ -103,7 +107,7 @@ class BaseLLMClient(ABC):
             reply, tool_uses, stop_reason, input_tokens,
             output_tokens, estimated_cost, latency_ms, model
         """
-        print("Calling BaseLLMClient.invoke")
+        logger.debug("Calling BaseLLMClient.invoke")
         pass
 
     @abstractmethod
@@ -124,7 +128,7 @@ class BaseLLMClient(ABC):
         -------
         dict — a message in the provider's format
         """
-        print("Calling BaseLLMClient.build_assistant_message")
+        logger.debug("Calling BaseLLMClient.build_assistant_message")
         pass
 
     @abstractmethod
@@ -146,13 +150,13 @@ class BaseLLMClient(ABC):
         -------
         list[dict] — messages in the provider's format
         """
-        print("Calling BaseLLMClient.build_tool_result_messages")
+        logger.debug("Calling BaseLLMClient.build_tool_result_messages")
         pass
 
     @staticmethod
     def build_tool_spec(name: str, description: str, parameters: dict) -> dict:
         """Build a tool definition in OpenAI function-calling format."""
-        print("Calling BaseLLMClient.build_tool_spec")
+        logger.debug("Calling BaseLLMClient.build_tool_spec")
         return {
             "type": "function",
             "function": {

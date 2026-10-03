@@ -23,6 +23,7 @@ from db.repositories.customer_repo import customer_repo
 from db.repositories.account_repo import account_repo
 from db.repositories.session_repo import session_repo
 from db.repositories.observability_repo import observability_repo
+from db.repositories.approval_repo import approval_repo
 
 logger = logging.getLogger("coordinator")
 
@@ -224,7 +225,7 @@ class CoordinatorAgent:
         Ask the LLM to classify which agent should handle this message.
         Returns: {"agent": "...", "action": "...", "summary": "..."}
         """
-        response = llm_client.invoke(
+        response = llm_client.invoke_with_retry(
             messages=[{"role": "user", "content": message}],
             system_prompt=ROUTING_PROMPT,
             session_id=session_id,
@@ -272,7 +273,7 @@ class CoordinatorAgent:
         This prevents short messages like "20" or "yes" from being
         routed away from the active agent.
         """
-        response = llm_client.invoke(
+        response = llm_client.invoke_with_retry(
             messages=[{"role": "user", "content": message}],
             system_prompt=(
                 f"The user is currently in a conversation handled by '{current_agent}'.\n"
@@ -304,7 +305,7 @@ class CoordinatorAgent:
 
     async def _handle_general(self, message: str, session_id: str) -> dict:
         """Handle greetings and general questions without a sub-agent."""
-        response = llm_client.invoke(
+        response = llm_client.invoke_with_retry(
             messages=[{"role": "user", "content": message}],
             system_prompt=GENERAL_PROMPT,
             session_id=session_id,
@@ -349,6 +350,148 @@ class CoordinatorAgent:
 
         return context
 
+
+
+"""
+HITL additions for coordinator.py
+
+Add these methods to your existing CoordinatorAgent class,
+and add the approval check at the START of handle_message().
+"""
+
+# ── Add this import at the top of coordinator.py ──────
+# from db.repositories.approval_repo import approval_repo
+
+
+# ── Add this block at the START of handle_message(), ──
+# ── BEFORE the active agent check (Step 0) ────────────
+
+async def handle_message(self, message, session_id, user_claims):
+    customer_id = user_claims["sub"]
+    user_roles = user_claims.get("roles", [])
+    start_time = time.time()
+
+    # ── Step -1: Check for pending approvals ──────
+    pending = await approval_repo.get_pending(session_id)
+    if pending:
+        intent = await self._check_approval_intent(message, session_id)
+        if intent == "approve":
+            return await self._execute_approved(pending[0], session_id, user_claims)
+        elif intent == "reject":
+            return await self._reject_pending(pending[0], session_id)
+        # else: user is asking something unrelated, continue normal routing
+
+        # ── Step 0: Check for active agent ────────────
+
+
+
+# ── Add these methods to CoordinatorAgent class ───────
+
+async def _check_approval_intent(self, message: str, session_id: str) -> str:
+    """
+    Ask the LLM if the user's message is approving, rejecting,
+    or something unrelated to the pending action.
+
+    Returns: "approve", "reject", or "other"
+    """
+    response = llm_client.invoke(
+        messages=[{"role": "user", "content": message}],
+        system_prompt=(
+            "The user has a pending action that requires their confirmation. "
+            "Based on their message, determine if they are:\n"
+            "- Approving/confirming the action (yes, confirm, approve, go ahead, do it, proceed, ok)\n"
+            "- Rejecting/cancelling the action (no, cancel, reject, don't, stop, nevermind)\n"
+            "- Asking something completely unrelated\n\n"
+            "Respond with ONLY one word: 'approve', 'reject', or 'other'"
+        ),
+        session_id=session_id,
+        model_override="anthropic.claude-3-haiku-20240307-v1:0",  # cheap for classification
+    )
+
+    await observability_repo.record_cost(
+        session_id=session_id,
+        model=response["model"],
+        input_tokens=response["input_tokens"],
+        output_tokens=response["output_tokens"],
+        estimated_cost=response["estimated_cost"],
+    )
+
+    reply = (response["reply"] or "").strip().lower()
+    if "approve" in reply or "confirm" in reply:
+        return "approve"
+    elif "reject" in reply or "cancel" in reply:
+        return "reject"
+    return "other"
+
+
+async def _execute_approved(self, pending: dict, session_id: str, user_claims: dict) -> dict:
+    """Execute a tool call that the user just approved."""
+    approval_id = pending["approval_id"]
+    tool_name = pending["tool_name"]
+    tool_arguments = pending["tool_arguments"]
+    agent_name = pending["agent"]
+    customer_id = user_claims["sub"]
+
+    # Mark as approved in DB
+    await approval_repo.approve(approval_id, decided_by=f"customer:{customer_id}")
+
+    # Audit trail
+    await observability_repo.audit(
+        action="approval_granted",
+        customer_id=customer_id,
+        resource=tool_name,
+        details={"approval_id": approval_id, "tool_arguments": tool_arguments},
+    )
+
+    # Build context and execute
+    context = await self._build_agent_context(customer_id, session_id)
+    agent = self.agents.get(agent_name)
+
+    if not agent:
+        return {
+            "reply": f"Sorry, I couldn't find the agent to execute your request.",
+            "agent_used": "coordinator",
+            "cost": await observability_repo.get_session_cost(session_id),
+        }
+
+    result = await agent.execute_approved_tool(
+        tool_name=tool_name,
+        tool_arguments=tool_arguments,
+        session_id=session_id,
+        context=context,
+    )
+
+    # Clear active agent so next message routes fresh
+    await session_repo.set_shared_state(session_id, "active_agent", None)
+
+    return {
+        "reply": result["reply"],
+        "agent_used": agent_name,
+        "cost": await observability_repo.get_session_cost(session_id),
+    }
+
+
+async def _reject_pending(self, pending: dict, session_id: str) -> dict:
+    """Reject a pending approval."""
+    approval_id = pending["approval_id"]
+    tool_name = pending["tool_name"]
+
+    await approval_repo.reject(approval_id, decided_by="customer")
+
+    await observability_repo.audit(
+        action="approval_rejected",
+        resource=tool_name,
+        details={"approval_id": approval_id},
+    )
+
+    # Clear active agent
+    await session_repo.set_shared_state(session_id, "active_agent", None)
+
+    return {
+        "reply": f"No problem — I've cancelled the {tool_name.replace('_', ' ')} request. Is there anything else I can help with?",
+        "agent_used": "coordinator",
+        "cost": await observability_repo.get_session_cost(session_id),
+    }
 
 # Singleton
 coordinator = CoordinatorAgent()
